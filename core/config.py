@@ -19,7 +19,7 @@ class Config:
         self.registry        = data['registry']
         self.image_prefix    = data['image_prefix']
 
-        self.enable_apt_caching = data.get('enable_apt_caching', False)
+        self.enable_apt_caching = data.get('enable_apt_caching', True)
 
         # optional / with defaults
         self.deploy_mode     = data.get('deploy_mode', 'image')

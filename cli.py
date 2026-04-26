@@ -7,6 +7,7 @@ from colorama import init as colorama_init, Fore
 
 from commands.init    import init_main
 from commands.stage   import stage_main
+from commands.sync    import sync_main
 from commands.build   import build_main
 from commands.launch  import launch_main
 from commands.prepare_base import prepare_base_main
@@ -45,11 +46,37 @@ def create_parser():
                     help='Only stage this single component')
     ps.add_argument('--refresh', action='store_true', help='Only re-render docker-compose.yml')
     ps.add_argument('--force-base', action='store_true', help='Force rebuild of base image')
+    ps.add_argument('--no-pull', action='store_true',
+                    help="Skip pulling images on hosts after build (use 'forge sync' to pull later)")
+    ps.add_argument('-j','--jobs', type=int, default=1,
+                    help='Max number of components to build in parallel (default: 1)')
     ps.set_defaults(func=lambda args: stage_main(
         project_root=args.project_root,
         component=args.component,
         refresh=args.refresh,
         force_base=args.force_base,
+        no_pull=args.no_pull,
+        jobs=args.jobs,
+        config_file=args.config_file
+    ))
+
+    # sync
+    psync = sp.add_parser('sync', help='Pull base & component images on hosts')
+    psync.add_argument('--host', default=None,
+                       help='Only pull on this host (name from config)')
+    psync.add_argument('-c','--component', default=None,
+                       help='Only pull this component image')
+    psync.add_argument('--skip-base', action='store_true', help='Skip pulling the base image')
+    psync.add_argument('--skip-components', action='store_true', help='Skip pulling component images')
+    psync.add_argument('-j','--jobs', type=int, default=1,
+                       help='Max parallel pulls (default: 1)')
+    psync.set_defaults(func=lambda args: sync_main(
+        project_root=args.project_root,
+        host_name=args.host,
+        component=args.component,
+        skip_base=args.skip_base,
+        skip_components=args.skip_components,
+        jobs=args.jobs,
         config_file=args.config_file
     ))
 
@@ -57,9 +84,12 @@ def create_parser():
     pb = sp.add_parser('build', help='Compile workspaces in Docker')
     pb.add_argument('-c','--component', default=None,
                     help='Only build this single component')
+    pb.add_argument('-j','--jobs', type=int, default=1,
+                    help='Max number of components to build in parallel (default: 1)')
     pb.set_defaults(func=lambda args: build_main(
         project_root=args.project_root,
         component=args.component,
+        jobs=args.jobs,
         config_file=args.config_file
     ))
 

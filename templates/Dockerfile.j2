@@ -1,5 +1,9 @@
+# syntax=docker/dockerfile:1.4
 # ─── Component Builder ─────────────────────────────────────────────────────
 FROM {{ base_image }}
+
+# Per-arch cache scoping for BuildKit cache mounts
+ARG TARGETARCH
 
 ENV PYTHONDONTWRITEBYTECODE=1
 
@@ -12,16 +16,33 @@ ENV VIRTUAL_ENV=/opt/venv
 ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 ENV PYTHONPATH="$VIRTUAL_ENV/lib/python3.12/site-packages:/usr/lib/python3/dist-packages:$PYTHONPATH"
 
+{% if enable_apt_caching %}
+# Keep downloaded .debs around so cache mounts can reuse them
+RUN rm -f /etc/apt/apt.conf.d/docker-clean && \
+    echo 'Binary::apt::APT::Keep-Downloaded-Packages "true";' > /etc/apt/apt.conf.d/keep-cache
+{% endif %}
+
 # 1) Install any component-specific system packages
 {% set valid_apt_packages = apt_packages | select('string') | map('trim') | select | list %}
 {% if valid_apt_packages %}
+{% if enable_apt_caching %}
+RUN --mount=type=cache,target=/var/cache/apt,id=apt-cache-{{ ros_distro }}-${TARGETARCH},sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,id=apt-lists-{{ ros_distro }}-${TARGETARCH},sharing=locked \
+    apt-get update && apt-get install -y {%- for pkg in valid_apt_packages %} {{ pkg }} {%- endfor %}
+{% else %}
 RUN apt-get update && apt-get install -y {%- for pkg in valid_apt_packages %} {{ pkg }} {%- endfor %} \
   && rm -rf /var/lib/apt/lists/*
+{% endif %}
 {% endif %}
 
 # 1b) Install any component-specific pip packages (into venv)
 {% if pip_packages %}
+{% if enable_apt_caching %}
+RUN --mount=type=cache,target=/root/.cache/pip,id=pip-cache-${TARGETARCH},sharing=locked \
+    pip install {{ pip_packages | join(' ') }}
+{% else %}
 RUN pip install --no-cache-dir {{ pip_packages | join(' ') }}
+{% endif %}
 {% endif %}
 
 # 2) VCS repos → build into /vcs_ws/install
@@ -34,19 +55,37 @@ RUN mkdir -p /vcs_ws/src
 COPY repos.yaml /vcs_ws/repos.yaml
 
 # Install vcstool if needed
+{% if enable_apt_caching %}
+RUN --mount=type=cache,target=/var/cache/apt,id=apt-cache-{{ ros_distro }}-${TARGETARCH},sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,id=apt-lists-{{ ros_distro }}-${TARGETARCH},sharing=locked \
+    apt-get update && apt-get install -y python3-vcstool
+{% else %}
 RUN apt-get update && apt-get install -y python3-vcstool && rm -rf /var/lib/apt/lists/*
+{% endif %}
 
 # Import VCS repositories
 RUN vcs import /vcs_ws/src < /vcs_ws/repos.yaml
 
 # ─── Build workspace ──────────────────────────────────────────────────────
 WORKDIR /vcs_ws
+{% if enable_apt_caching %}
+RUN --mount=type=cache,target=/var/cache/apt,id=apt-cache-{{ ros_distro }}-${TARGETARCH},sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,id=apt-lists-{{ ros_distro }}-${TARGETARCH},sharing=locked \
+    --mount=type=cache,target=/root/.ros,id=rosdep-cache-{{ ros_distro }}-${TARGETARCH},sharing=locked \
+    apt-get update \
+ && source /opt/ros/$ROS_DISTRO/setup.bash \
+ && rosdep init || true \
+ && rosdep update \
+ && rosdep install --from-paths src --ignore-src -y \
+ && colcon build --symlink-install --event-handlers console_direct+
+{% else %}
 RUN apt-get update \
  && source /opt/ros/$ROS_DISTRO/setup.bash \
  && rosdep init || true \
  && rosdep update \
  && rosdep install --from-paths src --ignore-src -y \
  && colcon build --symlink-install --event-handlers console_direct+
+{% endif %}
 
 # ─── Optional: Validate build success ─────────────────────────────────────
 
@@ -77,6 +116,21 @@ RUN echo '=== Checking source directory structure ===' \
  && find src -type f -name package.xml -exec echo '{}' \;
 
 # Install dependencies
+{% if enable_apt_caching %}
+RUN --mount=type=cache,target=/var/cache/apt,id=apt-cache-{{ ros_distro }}-${TARGETARCH},sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,id=apt-lists-{{ ros_distro }}-${TARGETARCH},sharing=locked \
+    --mount=type=cache,target=/root/.ros,id=rosdep-cache-{{ ros_distro }}-${TARGETARCH},sharing=locked \
+    set -exo pipefail \
+ && apt-get update \
+ && source /opt/ros/$ROS_DISTRO/setup.bash \
+ && if [ -f /ros_ws_common/install/setup.bash ]; then source /ros_ws_common/install/setup.bash; fi \
+ && (rosdep init 2>/dev/null || true) \
+ && rosdep update \
+ && echo '=== Checking what rosdep will install ===' \
+ && (rosdep keys --rosdistro $ROS_DISTRO --from-paths src --ignore-src | sort | uniq || echo 'No rosdep keys found') \
+ && echo '=== Installing dependencies ===' \
+ && rosdep install --rosdistro $ROS_DISTRO --from-paths src --ignore-src -r -y
+{% else %}
 RUN set -exo pipefail \
  && apt-get update \
  && source /opt/ros/$ROS_DISTRO/setup.bash \
@@ -87,6 +141,7 @@ RUN set -exo pipefail \
  && (rosdep keys --rosdistro $ROS_DISTRO --from-paths src --ignore-src | sort | uniq || echo 'No rosdep keys found') \
  && echo '=== Installing dependencies ===' \
  && rosdep install --rosdistro $ROS_DISTRO --from-paths src --ignore-src -r -y
+{% endif %}
 
 # Sanity check
 RUN source /opt/ros/$ROS_DISTRO/setup.bash \

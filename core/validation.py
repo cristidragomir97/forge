@@ -251,7 +251,7 @@ class ForgeConfig(BaseModel):
     image_prefix: str = Field(..., description="Docker image name prefix")
 
     # Optional fields with defaults
-    enable_apt_caching: bool = Field(False, description="Enable apt package caching")
+    enable_apt_caching: bool = Field(True, description="Enable BuildKit cache mounts for apt/pip/rosdep")
     deploy_mode: str = Field('image', description="Deployment mode")
     build_dir: str = Field('.forge/build', description="Build output directory")
     components_dir: str = Field('components', description="Components directory")

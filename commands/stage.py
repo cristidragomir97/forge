@@ -4,14 +4,17 @@ import sys
 import yaml
 import shutil
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List, Optional
 
 from colorama import Fore
 from core.config   import Config
 from core.renderer import TemplateRenderer
 from core.docker   import DockerHelper, is_localhost
+from core.logger   import ComponentLogger
 from core.models   import Component, Host
 from python_on_whales.exceptions import DockerException
+from utils.timing  import timed
 
 def resolve_source_packages(comp: Component, cfg: Config) -> List[tuple]:
     """
@@ -115,7 +118,8 @@ def build_component_image(comp: Component,
                           base_tag: str,
                           renderer: TemplateRenderer,
                           docker: DockerHelper,
-                          participant_id: int) -> dict:
+                          participant_id: int,
+                          logger: Optional[ComponentLogger] = None) -> dict:
 
     host = get_host(hosts_map, comp, cfg)
     img_tag = comp.image_tag(cfg)
@@ -166,7 +170,8 @@ def build_component_image(comp: Component,
             context=build_context,
             dockerfile=dockerfile,
             platforms=[platform],
-            push=True
+            push=True,
+            logger=logger
         )
 
         return {
@@ -286,7 +291,8 @@ def build_component_image(comp: Component,
             context=comp_dir,
             dockerfile=dockerfile_path,
             platforms=[platform],
-            push=True
+            push=True,
+            logger=logger
         )
 
     return {
@@ -319,7 +325,20 @@ def stage_main(project_root: str,
                component: Optional[str] = None,
                refresh: bool = False,
                force_base: bool = False,
+               no_pull: bool = False,
+               jobs: int = 1,
                config_file: str = 'config.yaml'):
+    with timed("stage"):
+        _stage_main_impl(project_root, component, refresh, force_base, no_pull, jobs, config_file)
+
+
+def _stage_main_impl(project_root: str,
+                     component: Optional[str],
+                     refresh: bool,
+                     force_base: bool,
+                     no_pull: bool,
+                     jobs: int,
+                     config_file: str):
     project_root = os.path.abspath(project_root)
     os.chdir(project_root)
 
@@ -355,21 +374,48 @@ def stage_main(project_root: str,
         from commands.prepare_base import prepare_base_main
         prepare_base_main(project_root, config_file=config_file, force=force_base)
 
-        # Only build filtered components
-        for comp in comps_to_build:
+        # Cap parallelism to the number of components and at least 1
+        max_workers = max(1, min(jobs, len(comps_to_build)))
+        use_parallel = max_workers > 1
+
+        def _build_one(comp: Component):
             host = hosts_map[comp.runs_on]
             participant_id = 2  # TODO: proper participant ID
-            entry = build_component_image(
+            logger = ComponentLogger(comp.name) if use_parallel else None
+            build_component_image(
                 comp, cfg, hosts_map, base_tag, renderer, docker,
-                participant_id=participant_id
+                participant_id=participant_id,
+                logger=logger,
             )
-            # Skip pull if building on device (image is already there)
-            if not (host.build_on_device and not is_localhost(host)):
-                try:
-                    docker.pull_image_on_host(host, base_tag)
-                except DockerException:
-                    print(Fore.RED + f"[stage] Failed to pull base image on host '{host.name}' ({host.ip})", file=sys.stderr)
-                    raise
+            # Skip pull if building on device (image is already there) or --no-pull
+            if no_pull:
+                return
+            if host.build_on_device and not is_localhost(host):
+                return
+            try:
+                docker.pull_image_on_host(host, base_tag)
+            except DockerException:
+                print(Fore.RED + f"[stage] Failed to pull base image on host '{host.name}' ({host.ip})", file=sys.stderr)
+                raise
+
+        if use_parallel:
+            print(f"[stage] Building {len(comps_to_build)} components in parallel (jobs={max_workers})")
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                futures = {executor.submit(_build_one, comp): comp for comp in comps_to_build}
+                first_error: Optional[BaseException] = None
+                for future in as_completed(futures):
+                    comp = futures[future]
+                    try:
+                        future.result()
+                    except BaseException as e:
+                        print(Fore.RED + f"[stage] Build failed for '{comp.name}': {e}", file=sys.stderr)
+                        if first_error is None:
+                            first_error = e
+                if first_error is not None:
+                    raise first_error
+        else:
+            for comp in comps_to_build:
+                _build_one(comp)
 
     # Generate staged entries for ALL components (for compose files)
     staged_by_host = {}
@@ -463,5 +509,8 @@ if __name__ == "__main__":
     parser.add_argument("-c", "--component", default=None, help="Component to restage")
     parser.add_argument("--refresh", action="store_true", help="Only regenerate docker-compose.yml")
     parser.add_argument("--force-base", action="store_true", help="Force rebuild of base image")
+    parser.add_argument("--no-pull", action="store_true", help="Skip pulling images on hosts after build")
+    parser.add_argument("-j", "--jobs", type=int, default=1, help="Max number of components to build in parallel")
     args = parser.parse_args()
-    stage_main(args.project_root, args.component, args.refresh, args.force_base)
+    stage_main(args.project_root, args.component, args.refresh, args.force_base,
+               no_pull=args.no_pull, jobs=args.jobs)

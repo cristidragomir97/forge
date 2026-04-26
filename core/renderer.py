@@ -117,7 +117,7 @@ class TemplateRenderer:
             zenoh_router_ip = zenoh_router_ip,
         )
 
-    def render_base(self, out_path: str, ros_distro: str, ubuntu: str, common_pkgs, workspace_dir: str = "ros_ws", apt_packages = [], apt_mirror: str = None, ros_apt_mirror: str = None, base_image_override: str = None):
+    def render_base(self, out_path: str, ros_distro: str, ubuntu: str, common_pkgs, workspace_dir: str = "ros_ws", apt_packages = [], apt_mirror: str = None, ros_apt_mirror: str = None, base_image_override: str = None, enable_apt_caching: bool = True):
             """
             Render Dockerfile.base.j2 → out_path
 
@@ -131,6 +131,7 @@ class TemplateRenderer:
                 apt_mirror: Custom Ubuntu apt mirror URL (optional)
                 ros_apt_mirror: Custom ROS apt mirror URL (optional)
                 base_image_override: Override base image (e.g., nvidia/cuda:12.0-devel-ubuntu22.04)
+                enable_apt_caching: Use BuildKit cache mounts for apt/pip/rosdep (default True)
             """
             self.render(
                 "Dockerfile.base.j2",
@@ -142,5 +143,6 @@ class TemplateRenderer:
                 apt_packages = apt_packages or [],
                 apt_mirror   = apt_mirror,
                 ros_apt_mirror = ros_apt_mirror,
-                base_image_override = base_image_override
+                base_image_override = base_image_override,
+                enable_apt_caching = enable_apt_caching,
             )
