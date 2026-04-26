@@ -100,13 +100,33 @@ apt_mirror: http://mirror.local/ubuntu
 ros_apt_mirror: http://mirror.local/ros2/ubuntu
 ```
 
-### Enable Apt Caching
+### BuildKit Cache Mounts (apt / pip / rosdep)
 
-For repeated builds, enable apt caching:
+`forge stage` uses BuildKit cache mounts to share apt downloads, the apt index, pip wheels, and the rosdep index across every component build. The first stage populates the cache; every subsequent build (and every other component built in parallel) reuses it instead of re-fetching from the network.
+
+This is **on by default**. Disable it via:
 
 ```yaml
-enable_apt_caching: true
+enable_apt_caching: false
 ```
+
+Caches are scoped per ROS distro and per architecture, so arm64 and amd64 builds don't pollute each other.
+
+**Where the cache lives:** inside the BuildKit builder, *not* inside any image.
+
+- Survives: `docker rmi`, `docker system prune`, `forge clean`, deleting your project, rebooting.
+- Wiped by: `docker buildx prune` (see [Cleanup](#cleanup) below).
+
+### Parallel Builds
+
+Build multiple components concurrently with `-j N`:
+
+```bash
+forge my_robot stage -j 4
+forge my_robot build -j 4
+```
+
+Combined with the shared cache mounts, this gives you near-linear speedup on multi-component projects.
 
 ---
 
@@ -342,6 +362,30 @@ docker image prune -a
 ```bash
 rm -rf .forge/build/*
 ```
+
+### Free Disk Space (BuildKit Cache)
+
+If you're running low on disk space, the BuildKit cache mounts (apt downloads, pip wheels, rosdep index) can grow to several GB. `docker image prune` does **not** touch them — they live in the BuildKit builder, not in any image.
+
+Inspect cache size:
+
+```bash
+docker buildx du
+```
+
+Trim entries older than 72h:
+
+```bash
+docker buildx prune --filter until=72h
+```
+
+Wipe the entire BuildKit cache:
+
+```bash
+docker buildx prune -af
+```
+
+After wiping, the next `forge stage` will be a cold build (re-downloads everything) — same as a fresh laptop.
 
 ### Reset Everything
 

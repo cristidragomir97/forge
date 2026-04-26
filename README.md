@@ -9,6 +9,7 @@ It helps you structure your robot software as modular components, run them acros
 - **Prototyping** quickly on your dev machine while keeping things reproducible
 - **Deploying** to real robots without ad hoc scripts and broken dependencies
 - **Iterating** on your robot system without rebuilding everything from scratch
+- **Building fast** — parallel component builds (`-j N`) and shared BuildKit caches for apt/pip/rosdep, so re-stages are seconds and full cold builds skip redundant downloads
 - **Scaling** from a single board to a multi-machine setup
 - **Sharing** complete robot recipes, not just isolated components
 
