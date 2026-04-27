@@ -67,7 +67,7 @@ forge my_robot launch    # Deploy to hosts
 ### Install from source
 
 ```bash
-git clone https://github.com/your-org/forge.git
+git clone https://github.com/cristidragomir97/forge.git
 cd forge
 pip install .
 ```
