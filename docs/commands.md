@@ -60,6 +60,8 @@ The stage step prepares each component's container image with all required depen
 3. The container ends up with a fully configured environment, ready for building
 4. `docker-compose.yaml` files for each host are generated with container settings
 
+Each built image then needs to get onto its target host. By default (`deploy_mode: image`) that's a registry push (from stage) + pull (from stage/sync/launch). Setting `deploy_mode: transfer` in `config.yaml` skips the registry entirely: images are built with `--load` instead of `--push`, then `docker save`d locally and `docker load`ed directly onto each host over its Docker API — no registry credentials or network access to a registry needed. See [Configuration](configuration.md).
+
 **For different component types:**
 - **Forge-managed**: Dependencies installed, ready for build step
 - **External image**: No build, image reference added to compose file

@@ -25,6 +25,12 @@ class RMWImplementation(str, Enum):
     ZENOH = "zenoh"
 
 
+class DeployMode(str, Enum):
+    """Supported deployment strategies for getting images onto hosts."""
+    IMAGE = "image"        # push to cfg.registry, pull on each host
+    TRANSFER = "transfer"  # docker save locally, docker load directly onto each host
+
+
 class ZenohConfig(BaseModel):
     """Zenoh-specific configuration."""
     model_config = ConfigDict(extra='forbid')
@@ -32,6 +38,9 @@ class ZenohConfig(BaseModel):
     router_image: str = Field("eclipse-zenoh/zenoh:latest", description="Zenoh router Docker image")
     router_port: int = Field(7447, ge=1, le=65535, description="Zenoh router port")
     config_file: Optional[str] = Field(None, description="Path to custom zenoh.json5 config")
+    router_devices: List[str] = Field(default_factory=list, description="Devices to map into the router container (e.g. a serial-transport board bridge)")
+    router_environment: Dict[str, Any] = Field(default_factory=dict, description="Environment variables for the router container")
+    router_command: Optional[str] = Field(None, description="Override the router container command (default: --listen tcp/0.0.0.0:<port>)")
 
 
 class HostConfig(BaseModel):
@@ -252,7 +261,7 @@ class ForgeConfig(BaseModel):
 
     # Optional fields with defaults
     enable_apt_caching: bool = Field(True, description="Enable BuildKit cache mounts for apt/pip/rosdep")
-    deploy_mode: str = Field('image', description="Deployment mode")
+    deploy_mode: DeployMode = Field(DeployMode.IMAGE, description="Deployment mode: image (registry push/pull) or transfer (docker save/load, no registry)")
     build_dir: str = Field('.forge/build', description="Build output directory")
     components_dir: str = Field('components', description="Components directory")
     workspace_dir: str = Field('ros_ws', description="ROS workspace directory name")

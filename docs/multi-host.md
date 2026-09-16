@@ -10,6 +10,7 @@ By defining multiple `hosts` in your config and assigning components to them via
 - Networking and middleware discovery configuration
 - Cross-architecture builds (amd64, arm64, armv7)
 - Syncing compiled artifacts to each host
+- Getting built images onto each host, via a registry or direct transfer (see [Image Deployment](#image-deployment-registry-or-direct-transfer) below)
 - Generating per-host docker-compose files
 
 ---
@@ -217,6 +218,28 @@ When enabled, all build operations happen natively on the device:
 - **ROS workspaces** (forge build) are compiled on the device
 
 This is **much faster** for ARM64 targets when your dev machine is x86_64 (often 10x or more).
+
+---
+
+## Image Deployment: Registry or Direct Transfer
+
+Once images are built, forge has to get them onto each host. Two modes, set via `deploy_mode` in `config.yaml`:
+
+### `deploy_mode: image` (Default)
+
+`stage` pushes built images to `registry`; `sync` and `launch` pull them on each host. Standard Docker registry workflow — needs registry credentials and network access to it from both your dev machine and every host.
+
+### `deploy_mode: transfer`
+
+No registry involved. Images are built locally with `docker build --load` (kept in your local Docker daemon instead of pushed), then `docker save`d and `docker load`ed directly onto each host over its Docker API (`host.ip:host.port`) — the same connection forge already uses to pull images and run compose. Useful when hosts can't reach a registry (air-gapped robots, local-only networks) or you'd rather not stand one up.
+
+```yaml
+registry: local          # still required as an image-name prefix, just never pushed to
+image_prefix: myrobot
+deploy_mode: transfer
+```
+
+This applies to any host that isn't `build_on_device` (those build directly on the target already, so there's nothing to transfer) or `localhost` (the image is already in the local daemon).
 
 ---
 

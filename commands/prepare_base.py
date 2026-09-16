@@ -142,22 +142,7 @@ def prepare_base_main(project_root: str, config_file: str = 'config.yaml', force
 
     base_tag = f"{cfg.registry}/{cfg.image_prefix}_base:{cfg.ros_distro}-{cfg.tag}"
 
-    # Check if we can skip rebuild
-    if not force:
-        current_hash = compute_base_hash(cfg, project_root)
-        cached_hash = load_base_hash(base_dir)
-
-        if current_hash == cached_hash:
-            # Check if image exists locally
-            try:
-                docker.client.image.inspect(base_tag)
-                print(f"[prepare_base] Base image {base_tag} is up to date (cached)")
-                print(f"[prepare_base] Use 'stage --force-base' to rebuild")
-                return
-            except Exception:
-                print(f"[prepare_base] Base config unchanged but image not found locally, rebuilding...")
-        else:
-            print(f"[prepare_base] Base configuration changed, rebuilding...")
+    use_transfer = cfg.deploy_mode == 'transfer'
 
     # Group hosts by architecture and determine build strategy
     host_arch = get_host_arch()
@@ -184,16 +169,58 @@ def prepare_base_main(project_root: str, config_file: str = 'config.yaml', force
         else:
             local_build_platforms.append(f"linux/{arch}")
 
+    # Check if we can skip rebuild
+    if not force:
+        current_hash = compute_base_hash(cfg, project_root)
+        cached_hash = load_base_hash(base_dir)
+
+        if current_hash == cached_hash:
+            try:
+                if use_transfer:
+                    # Transfer mode keeps per-arch local tags (no shared
+                    # manifest-list tag), so check every arch we'd build.
+                    for platform_str in local_build_platforms:
+                        arch = platform_str.split('/', 1)[1]
+                        docker.client.image.inspect(f"{base_tag}__{arch}")
+                else:
+                    docker.client.image.inspect(base_tag)
+                print(f"[prepare_base] Base image {base_tag} is up to date (cached)")
+                print(f"[prepare_base] Use 'stage --force-base' to rebuild")
+                return
+            except Exception:
+                print(f"[prepare_base] Base config unchanged but image not found locally, rebuilding...")
+        else:
+            print(f"[prepare_base] Base configuration changed, rebuilding...")
+
     # Build locally for architectures without build_on_device hosts
     if local_build_platforms:
-        print(f"[prepare_base] Building base image {base_tag} locally for: {', '.join(local_build_platforms)}")
-        docker.build_multiarch(
-            image_tag=base_tag,
-            context=base_dir,
-            dockerfile=base_dockerfile,
-            platforms=local_build_platforms,
-            push=True
-        )
+        if use_transfer:
+            # buildx --load only supports a single platform at a time (it
+            # can't materialize a manifest list in the local daemon the way
+            # --push does in a registry), so build+load each arch separately
+            # under its own local tag; deploy_base_image_to_host() picks the
+            # right one per host and retags it to base_tag once it lands.
+            for platform_str in local_build_platforms:
+                arch = platform_str.split('/', 1)[1]
+                arch_tag = f"{base_tag}__{arch}"
+                print(f"[prepare_base] Building base image {arch_tag} locally for {platform_str} (transfer mode)")
+                docker.build_multiarch(
+                    image_tag=arch_tag,
+                    context=base_dir,
+                    dockerfile=base_dockerfile,
+                    platforms=[platform_str],
+                    push=False,
+                    load=True,
+                )
+        else:
+            print(f"[prepare_base] Building base image {base_tag} locally for: {', '.join(local_build_platforms)}")
+            docker.build_multiarch(
+                image_tag=base_tag,
+                context=base_dir,
+                dockerfile=base_dockerfile,
+                platforms=local_build_platforms,
+                push=True
+            )
 
     # Build on-device for architectures with build_on_device hosts
     for arch, host in on_device_builds:

@@ -165,12 +165,14 @@ def build_component_image(comp: Component,
 
         print(f"[stage] Building '{comp.name}' from custom Dockerfile → {img_tag} for [{platform}]")
 
+        use_transfer = cfg.deploy_mode == 'transfer'
         docker.build_multiarch(
             image_tag=img_tag,
             context=build_context,
             dockerfile=dockerfile,
             platforms=[platform],
-            push=True,
+            push=not use_transfer,
+            load=use_transfer,
             logger=logger
         )
 
@@ -286,12 +288,14 @@ def build_component_image(comp: Component,
     else:
         print(f"[stage] Building '{comp.name}' → {img_tag} for [{platform}]")
         # Use comp_dir as context (self-contained build context)
+        use_transfer = cfg.deploy_mode == 'transfer'
         docker.build_multiarch(
             image_tag=img_tag,
             context=comp_dir,
             dockerfile=dockerfile_path,
             platforms=[platform],
-            push=True,
+            push=not use_transfer,
+            load=use_transfer,
             logger=logger
         )
 
@@ -365,6 +369,7 @@ def _stage_main_impl(project_root: str,
         all_components_by_host[comp.runs_on].append(comp)
 
     base_tag = cfg.base_image
+    images_dir = os.path.join(cfg.root, cfg.build_dir, 'images')
 
     # If refresh mode, skip all building and just regenerate compose files
     if refresh:
@@ -387,16 +392,19 @@ def _stage_main_impl(project_root: str,
                 participant_id=participant_id,
                 logger=logger,
             )
-            # Skip pull if building on device (image is already there) or --no-pull
+            # Skip pull/transfer if building on device (image is already there) or --no-pull
             if no_pull:
                 return
             if host.build_on_device and not is_localhost(host):
                 return
-            try:
-                docker.pull_image_on_host(host, base_tag)
-            except DockerException:
-                print(Fore.RED + f"[stage] Failed to pull base image on host '{host.name}' ({host.ip})", file=sys.stderr)
-                raise
+            if cfg.deploy_mode == 'transfer':
+                docker.deploy_base_image_to_host(host, base_tag, images_dir)
+            else:
+                try:
+                    docker.pull_image_on_host(host, base_tag)
+                except DockerException:
+                    print(Fore.RED + f"[stage] Failed to pull base image on host '{host.name}' ({host.ip})", file=sys.stderr)
+                    raise
 
         if use_parallel:
             print(f"[stage] Building {len(comps_to_build)} components in parallel (jobs={max_workers})")

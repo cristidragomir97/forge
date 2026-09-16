@@ -12,6 +12,7 @@ registry: docker.io/myuser            # Docker registry URL
 image_prefix: myrobot                 # Docker image name prefix
 
 # Optional fields
+deploy_mode: image                    # "image" (registry push/pull, default) or "transfer" (docker save/load, no registry)
 tag: latest                           # Docker image tag (default: latest)
 build_dir: .forge/build               # Build output directory
 workspace_dir: ros_ws                 # ROS workspace directory name
@@ -52,6 +53,7 @@ zenoh:
 
 | Field | Default | Description |
 |-------|---------|-------------|
+| `deploy_mode` | `image` | `image` pushes to `registry` and pulls on each host; `transfer` does `docker save` locally and `docker load` directly onto each host's Docker API (`host.port`), skipping the registry entirely |
 | `tag` | `latest` | Docker image tag |
 | `build_dir` | `.forge/build` | Local build output directory |
 | `workspace_dir` | `ros_ws` | ROS workspace name |

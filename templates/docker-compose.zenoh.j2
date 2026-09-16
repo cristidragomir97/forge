@@ -134,7 +134,20 @@ services:
     restart: unless-stopped
     ports:
       - "{{ zenoh_router_port }}:{{ zenoh_router_port }}"
-    command: --listen tcp/0.0.0.0:{{ zenoh_router_port }}
+    {% if zenoh_router_devices %}
+    devices:
+      {% for dev in zenoh_router_devices %}
+      - "{{ dev }}"
+      {% endfor %}
+    cap_add:
+      - SYS_RAWIO
+    {% endif %}
+    {% if zenoh_router_environment %}
+    environment:
+      {% for key, value in zenoh_router_environment.items() %}
+      - {{ key }}={{ value }}
+      {% endfor %}
+    {% endif %}
 {% set named_volumes = [] %}
 {% for comp in components %}
 {% for vol in comp.volumes %}

@@ -31,7 +31,79 @@ class DockerHelper:
             cc = DockerClient(host=url)
             cc.pull(image)
 
-    def build_multiarch(self, image_tag, context, dockerfile, platforms, push=True, logger=None):
+    def save_image(self, image_tag: str, output_path: str):
+        """Save a locally-loaded image to a tar file (deploy_mode: transfer)."""
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        print(f"[docker] Saving {image_tag} -> {output_path}")
+        self.client.image.save(image_tag, output=output_path)
+
+    def load_image_on_host(self, host, tar_path: str):
+        """
+        Load a tar saved by save_image() onto a host.
+
+        Same transport pull_image_on_host() uses: for a remote host we point
+        a docker CLI invocation at its TCP API (host.ip:host.port) instead of
+        SSHing in — `docker load -i <local tar>` then streams the tar's
+        content over that connection to the remote daemon directly, no
+        registry and no need to copy the file onto the remote filesystem
+        first.
+        """
+        print(f"[docker] Loading {os.path.basename(tar_path)} on {host.name}...")
+        if is_localhost(host):
+            self.client.image.load(input=tar_path)
+        else:
+            url = f"tcp://{host.ip}:{host.port}"
+            cc = DockerClient(host=url)
+            cc.image.load(input=tar_path)
+
+    def retag_on_host(self, host, source_tag: str, target_tag: str):
+        """Retag an image already present on a host (local or remote via TCP API)."""
+        if is_localhost(host):
+            self.client.image.tag(source_tag, target_tag)
+        else:
+            url = f"tcp://{host.ip}:{host.port}"
+            cc = DockerClient(host=url)
+            cc.image.tag(source_tag, target_tag)
+
+    def deploy_image(self, host, image_tag: str, images_dir: str):
+        """
+        Get a locally-built, single-arch image onto a host without a
+        registry (deploy_mode: transfer). Drop-in replacement for
+        pull_image_on_host() when the host isn't the local machine.
+
+        Localhost is a no-op: build_multiarch(..., load=True) already left
+        the image in the local daemon.
+        """
+        if is_localhost(host):
+            return
+        safe_name = image_tag.replace("/", "_").replace(":", "_")
+        tar_path = os.path.join(images_dir, f"{safe_name}.tar")
+        self.save_image(image_tag, tar_path)
+        self.load_image_on_host(host, tar_path)
+
+    def deploy_base_image_to_host(self, host, base_tag: str, images_dir: str):
+        """
+        Deploy the base image to a host under deploy_mode: transfer.
+
+        A single local docker store can't hold two different single-arch
+        images under one shared tag the way a registry manifest list can, so
+        prepare_base_main() builds+loads the base image per-arch locally as
+        f"{base_tag}__{arch}". This picks the variant matching the host's
+        arch, gets it onto the host, and retags it there to the plain
+        base_tag that compose files reference.
+        """
+        if host.build_on_device and not is_localhost(host):
+            return  # built directly on that device, nothing to deploy
+        arch_tag = f"{base_tag}__{host.arch}"
+        if is_localhost(host):
+            self.retag_on_host(host, arch_tag, base_tag)
+            return
+        tar_path = os.path.join(images_dir, f"base_{host.arch}.tar")
+        self.save_image(arch_tag, tar_path)
+        self.load_image_on_host(host, tar_path)
+        self.retag_on_host(host, arch_tag, base_tag)
+
+    def build_multiarch(self, image_tag, context, dockerfile, platforms, push=True, load=False, logger=None):
         """
         Build multi-architecture image.
 
@@ -41,6 +113,9 @@ class DockerHelper:
             dockerfile: Path to Dockerfile
             platforms: List of target platforms
             push: Whether to push after building
+            load: Whether to load the result into the local docker daemon
+                  instead (used by deploy_mode: transfer; only valid for a
+                  single platform — buildx can't --load a manifest list)
             logger: Optional ComponentLogger for prefixed output
         """
         try:
@@ -55,6 +130,8 @@ class DockerHelper:
                 ]
                 if push:
                     cmd.append("--push")
+                if load:
+                    cmd.append("--load")
                 cmd.append(context)
 
                 # Run with line-by-line output capture
@@ -84,6 +161,7 @@ class DockerHelper:
                     platforms=platforms,
                     tags=[image_tag],
                     push=push,
+                    load=load,
                     progress='plain',
                     cache=True
                 )

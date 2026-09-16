@@ -7,7 +7,7 @@ It helps you structure your robot software as modular components, run them acros
 ## What forge helps with
 
 - **Prototyping** quickly on your dev machine while keeping things reproducible
-- **Deploying** to real robots without ad hoc scripts and broken dependencies
+- **Deploying** to real robots without ad hoc scripts and broken dependencies — with or without a Docker registry (`deploy_mode: transfer` ships images directly via `docker save`/`load`)
 - **Iterating** on your robot system without rebuilding everything from scratch
 - **Building fast** — parallel component builds (`-j N`) and shared BuildKit caches for apt/pip/rosdep, so re-stages are seconds and full cold builds skip redundant downloads
 - **Scaling** from a single board to a multi-machine setup
@@ -87,6 +87,7 @@ ros_distro: humble
 ros_domain_id: 0
 registry: docker.io/myuser
 image_prefix: myrobot
+# deploy_mode: transfer     # optional: skip the registry, ship images via docker save/load instead
 
 hosts:
   - name: robot
@@ -131,6 +132,14 @@ components:
 ```
 
 **Iterating:** After code changes, just run `build` and `launch` again.
+
+---
+
+## Image Deployment: Registry or Direct Transfer
+
+By default (`deploy_mode: image`), `stage` pushes built images to `registry` and `sync`/`launch` pull them on each host — the usual Docker workflow.
+
+Set `deploy_mode: transfer` to skip the registry entirely: images are built locally (`docker build --load`), then shipped straight to each host with `docker save` + `docker load` over its Docker API — no registry credentials, no network access to a registry, works fully air-gapped/local-network. See [Configuration](docs/configuration.md).
 
 ---
 

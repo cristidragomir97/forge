@@ -20,9 +20,11 @@ def sync_main(project_root: str,
               jobs: int = 1,
               config_file: str = 'config.yaml'):
     """
-    Pull images on remote hosts so they're ready to launch.
+    Get images onto remote hosts so they're ready to launch.
 
-    By default pulls the base image and every component image on each host.
+    By default pulls the base image and every component image on each host
+    from the registry. Under deploy_mode: transfer, images are instead saved
+    locally and loaded directly onto each host (no registry involved).
     Hosts that build on-device are skipped (their images are already local).
     """
     with timed("sync"):
@@ -72,18 +74,28 @@ def _sync_main_impl(project_root: str,
         print("[sync] Nothing to pull.")
         return
 
+    use_transfer = cfg.deploy_mode == 'transfer'
+    images_dir = os.path.join(cfg.root, cfg.build_dir, 'images')
+
     def _pull(host: Host, image: str, label: str):
-        print(f"[sync:{host.name}] Pulling {label} ({image})...")
+        verb = "Transferring" if use_transfer else "Pulling"
+        print(f"[sync:{host.name}] {verb} {label} ({image})...")
         try:
-            docker.pull_image_on_host(host, image)
+            if use_transfer:
+                if label == "base":
+                    docker.deploy_base_image_to_host(host, image, images_dir)
+                else:
+                    docker.deploy_image(host, image, images_dir)
+            else:
+                docker.pull_image_on_host(host, image)
         except DockerException:
-            print(Fore.RED + f"[sync:{host.name}] Failed to pull {image} on '{host.name}' ({host.ip})", file=sys.stderr)
+            print(Fore.RED + f"[sync:{host.name}] Failed to get {image} on '{host.name}' ({host.ip})", file=sys.stderr)
             raise
         print(Fore.GREEN + f"[sync:{host.name}] ✓ {label}")
 
     max_workers = max(1, min(jobs, len(pulls)))
     if max_workers > 1:
-        print(f"[sync] Pulling {len(pulls)} image(s) in parallel (jobs={max_workers})")
+        print(f"[sync] Processing {len(pulls)} image(s) in parallel (jobs={max_workers})")
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             futures = {executor.submit(_pull, h, img, lbl): (h, img, lbl) for h, img, lbl in pulls}
             first_error: Optional[BaseException] = None

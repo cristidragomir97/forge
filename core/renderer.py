@@ -115,6 +115,9 @@ class TemplateRenderer:
             zenoh_router_image = cfg.zenoh_router_image,
             zenoh_router_port = cfg.zenoh_router_port,
             zenoh_router_ip = zenoh_router_ip,
+            zenoh_router_devices = cfg.zenoh_router_devices,
+            zenoh_router_environment = cfg.zenoh_router_environment,
+            zenoh_router_command = cfg.zenoh_router_command,
         )
 
     def render_base(self, out_path: str, ros_distro: str, ubuntu: str, common_pkgs, workspace_dir: str = "ros_ws", apt_packages = [], apt_mirror: str = None, ros_apt_mirror: str = None, base_image_override: str = None, enable_apt_caching: bool = True):

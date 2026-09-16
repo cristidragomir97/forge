@@ -37,6 +37,16 @@ class Config:
         self.zenoh_router_image = zenoh_data.get('router_image', 'eclipse-zenoh/zenoh:latest')
         self.zenoh_router_port = zenoh_data.get('router_port', 7447)
         self.zenoh_config_file = zenoh_data.get('config_file', None)
+        # Devices/env for the router container. Lets a serial-transport router
+        # (e.g. an Axon zenoh-pico board bridge) open its USB device — the
+        # serial link is over the device, not the network, so the router stays
+        # on the bridge and zenoh forwards between serial + TCP peers.
+        self.zenoh_router_devices = zenoh_data.get('router_devices', [])
+        self.zenoh_router_environment = zenoh_data.get('router_environment', {})
+        # Optional override of the router container command. Default keeps the
+        # plain TCP listener; serial-router images that derive their own
+        # endpoints from env can ignore or override it.
+        self.zenoh_router_command = zenoh_data.get('router_command', None)
 
         # DDS configuration (used when rmw_implementation is fastdds)
         self.enable_dds_router = data.get('enable_dds_router', False)

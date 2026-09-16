@@ -48,9 +48,26 @@ def launch_main(project_root: str, host_name: str = None, no_pull: bool = False,
             # Only sync builds for components that run on this host
             sync.rsync_builds(project_root, host, host_components)
 
-        # Pull component images on host (unless --no-pull)
-        if no_pull:
-            print(f"[launch:{host.name}] Skipping image pull (--no-pull)")
+        # Get component images onto the host. Skip when --no-pull, or when this
+        # host builds on-device: stage builds those images locally with
+        # push=False (see stage.py), so they're already present and were
+        # never pushed to a registry — pulling them errors with "manifest
+        # unknown". `docker compose up` below still pulls any genuinely
+        # missing images (e.g. external `image:` components from a registry).
+        on_device = host.build_on_device and not is_localhost(host)
+        if no_pull or on_device:
+            reason = "--no-pull" if no_pull else "host builds on-device"
+            print(f"[launch:{host.name}] Skipping image pull ({reason}); compose pulls any missing images")
+        elif cfg.deploy_mode == 'transfer':
+            images_dir = os.path.join(cfg.root, cfg.build_dir, 'images')
+            for comp in host_components:
+                image = comp.image_tag(cfg)
+                print(f"[launch:{host.name}] Transferring {image}...")
+                try:
+                    docker.deploy_image(host, image, images_dir)
+                except DockerException:
+                    print(Fore.RED + f"[launch:{host.name}] Failed to transfer image on host '{host.name}' ({host.ip})", file=sys.stderr)
+                    raise
         else:
             for comp in host_components:
                 image = comp.image_tag(cfg)
